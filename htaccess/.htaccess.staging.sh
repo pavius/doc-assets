@@ -9,7 +9,12 @@
 # Redirect old versioned sections URLs (<section>/<version>/ where <version> is
 # "vX.Y" or "latest-release") to <version>/<section>
 # <section>/vX.Y/* > latest-release/)
-RedirectMatch 301 ^/(docs)/([^/]+)/(v[0-9]\.[0-9]|latest-release)(|/.*)$ https://igzdocsdev.wpengine.com/$1//$3/$2$4
+RedirectMatch 301 ^/(docs)/(concepts|intro|reference|tutorials)/(v[0-9]\.[0-9]|latest-release)(|/.*)$ https://igzdocsdev.wpengine.com/$1/$3/$2$4
+
+# Redirect old non-versioned section pages (such as release-notes/*) and all
+# section root-directory URLs (<section>/ - after the <section>/<version>/
+# redirect) to latest-release/<section>/*
+RedirectMatch 301 ^/(docs)/(concepts|intro|reference|release-notes|specs|tutorials)(|/.*)$ https://igzdocsdev.wpengine.com/$1/latest-release/$2/$3
 
 #///////////////////////////////////////
 # Redirect latest-release version-number URLs (/v<X.Y/X.Y.Z (latest release)>/*
