@@ -6,13 +6,10 @@
 # with a starts-with rule should begin with "^/docs".
 
 #///////////////////////////////////////
-# Redirect old versioned sections URLs (<section>/latest-release/* or
+# Redirect old versioned sections URLs (<section>/<version>/ where <version> is
+# "vX.Y" or "latest-release") to <version>/<section>
 # <section>/vX.Y/* > latest-release/)
-RedirectMatch 301 ^/(docs/[^/]+)/v[0-9](|/.*)$ https://igzdocsdev.wpengine.com/$1/latest-release/$2
-
-#///////////////////////////////////////
-# Redirect obsolete docs-archive URLs
-RedirectMatch 301 ^/docs-archive(|/.*)$ https://igzdocsdev.wpengine.com/docs/latest-release/
+RedirectMatch 301 ^/(docs)/([^/]+)/(v[0-9]\.[0-9]|latest-release)(|/.*)$ https://igzdocsdev.wpengine.com/$1//$3/$2$4
 
 #///////////////////////////////////////
 # Redirect latest-release version-number URLs (/v<X.Y/X.Y.Z (latest release)>/*
