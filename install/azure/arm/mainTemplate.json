@@ -46,9 +46,23 @@
     },
     "allocatePublicIpAddresses": {
       "type": "bool",
-      "defaultValue": true,
+      "defaultValue": false,
       "metadata": {
         "description": "If true, the Virtual Machine interfaces receive a public IP address"
+      }
+    },
+    "whitelistIguazioNetwork": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "If allocatePublicIpAddresses is true, this will punch holes through the security groups to allow access from Iguazio support"
+      }
+    },
+    "whitelistedCidrs": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "If allocatePublicIpAddresses is true, this will punch holes through the security groups to allow access from these CIDRs to the system service ports"
       }
     },
     "vnetSubnetName": {
@@ -83,8 +97,7 @@
       "type": "string",
       "defaultValue": "Standard_L16s_v2",
       "allowedValues": [
-        "Standard_L16s_v2",
-        "Standard_L32s_v2"
+        "Standard_L16s_v2"
       ],
       "metadata": {
         "description": "This is the size of your data VMs"
@@ -105,10 +118,6 @@
     "numDataNodes": {
       "type": "int",
       "defaultValue": 1,
-      "allowedValues": [
-        1,
-        3
-      ],
       "metadata": {
         "description": "Number of data nodes"
       }
@@ -143,7 +152,7 @@
     },
     "vaultUrl": {
       "type": "string",
-      "defaultValue": "https://vault.trial.provazio.iguazio.com"
+      "defaultValue": "https://vault.prod.provazio.iguazio.com"
     },
     "systemDomain": {
       "type": "string",
@@ -203,8 +212,11 @@
     "installerPublicIpAddressName": "[concat(variables('systemId'), '-installer-public-ip-address')]",
     "temporaryAdminUsername": "iguazio",
     "temporaryAdminPassword": "IguazioTemporaryAdminPass0!",
-    "provisionScriptFileUri": "https://gist.githubusercontent.com/pavius/a58b1b3e7dce95b357a277eddc2901c6/raw/a345d702f6ffcf0d378e73a978fb93c25b5475c1/install.py",
-    "servicePrincipalArguments": "[if(empty(parameters('spClientSecret')), '', concat(' --sp-tenant-id ', parameters('spTenantId'), ' --sp-subscription-id ', parameters('spSubscriptionId'), ' --sp-client-id ', parameters('spClientId'), ' --sp-client-secret ', parameters('spClientSecret')))]"
+    "provisionScriptFileUri": "https://gist.githubusercontent.com/pavius/a58b1b3e7dce95b357a277eddc2901c6/raw/31fd944be9002bf14942460a20fc1bab4ed05077/install.py",
+    "servicePrincipalArguments": "[if(empty(parameters('spClientSecret')), '', concat(' --sp-tenant-id ', parameters('spTenantId'), ' --sp-subscription-id ', parameters('spSubscriptionId'), ' --sp-client-id ', parameters('spClientId'), ' --sp-client-secret ', parameters('spClientSecret')))]",
+    "whitelistIguazioNetworkArgument": "[if(and(parameters('allocatePublicIpAddresses'), parameters('whitelistIguazioNetwork')), ' --whitelist-iguazio-network', '')]",
+    "whitelistCidrsArgument": "[if(empty(parameters('whitelistedCidrs')), '', concat(' --whitelisted-cidrs ', parameters('whitelistedCidrs')))]",
+    "installerSecurityGroupName": "[concat(variables('systemId'), '-installer-security-group')]"
   },
   "resources": [
     {
@@ -221,30 +233,19 @@
       }
     },
     {
+      "name": "[variables('installerSecurityGroupName')]",
+      "type": "Microsoft.Network/applicationSecurityGroups",
+      "apiVersion": "2018-11-01",
+      "location": "[parameters('location')]",
+      "properties": {}
+    },
+    {
       "name": "[variables('vnetSecurityGroupName')]",
       "type": "Microsoft.Network/networkSecurityGroups",
       "apiVersion": "2018-11-01",
       "location": "[parameters('location')]",
       "properties": {
-        "securityRules": [
-          {
-            "name": "allFromIguazio",
-            "properties": {
-              "protocol": "*",
-              "sourcePortRange": "*",
-              "destinationPortRange": "*",
-              "destinationAddressPrefix": "*",
-              "access": "Allow",
-              "priority": 100,
-              "direction": "Inbound",
-              "sourceAddressPrefixes": [
-                "199.203.119.33/32",
-                "199.203.138.178/32",
-                "52.51.164.0/32"
-              ]
-            }
-          }
-        ]
+        "securityRules": []
       }
     },
     {
@@ -291,6 +292,7 @@
       "name": "[variables('installerNicName')]",
       "location": "[parameters('location')]",
       "dependsOn": [
+        "[resourceId('Microsoft.Network/applicationSecurityGroups', variables('installerSecurityGroupName'))]",
         "[resourceId('Microsoft.Network/publicIPAddresses/', variables('installerPublicIpAddressName'))]",
         "[resourceId('Microsoft.Network/virtualNetworks/', variables('vnetName'))]"
       ],
@@ -303,7 +305,12 @@
               "publicIPAddress": "[if(parameters('allocatePublicIpAddresses'), json(concat('{\"id\": \"', resourceId(variables('vnetResourceGroup'), 'Microsoft.Network/publicIPAddresses', variables('installerPublicIpAddressName')), '\"}')), json('null'))]",
               "subnet": {
                 "id": "[resourceId(variables('vnetResourceGroup'), 'Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('vnetSubnetName'))]"
-              }
+              },
+              "applicationSecurityGroups": [
+                {
+                  "id": "[resourceId('Microsoft.Network/applicationSecurityGroups', variables('installerSecurityGroupName'))]"
+                }
+              ]
             }
           }
         ]
@@ -405,7 +412,7 @@
         "autoUpgradeMinorVersion": true,
         "settings": {},
         "protectedSettings": {
-          "commandToExecute": "[concat('chmod +x /var/lib/waagent/custom-script/download/0/install.py && curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && sudo python get-pip.py && sudo pip install requests delegator.py && python /var/lib/waagent/custom-script/download/0/install.py ', ' --api-key ', parameters('apiKey'), ' --vault-url ', parameters('vaultUrl'), ' --provazio-dashboard-image ', parameters('provazioDashboardImage'), ' --system-id ', variables('systemId'), ' --system-description Azure', ' --system-version ', variables('systemVersion'), ' --system-domain ', parameters('systemDomain'), ' --system-region ', parameters('location'), ' --system-https-cert-kind ', parameters('httpsCertKind'), ' --system-resource-group-name ', resourceGroup().name, ' --system-vnet-name ', variables('vnetName'), ' --system-vnet-subnet-name ', variables('vnetSubnetName'), ' --system-vnet-resource-group-name ', variables('vnetResourceGroup'), ' --system-public-ip-address-kind ', variables('systemPublicIpAddressKind'), ' --data-cluster-num-instances ', parameters('numDataNodes'), ' --data-cluster-instance-size ', parameters('dataVmSize'), ' --app-cluster-num-instances ', parameters('numAppNodes'), ' --app-cluster-instance-size ', parameters('appVmSize'), ' --admin-username ', parameters('adminUsername'), ' --admin-password ', parameters('adminPassword'), ' --owner-full-name \"', parameters('ownerName'), '\" --owner-email azure@iguazio.com', ' --intercom-mode ', parameters('intercomMode'), variables('servicePrincipalArguments'))]",
+          "commandToExecute": "[concat('chmod +x /var/lib/waagent/custom-script/download/0/install.py && curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && sudo python get-pip.py && sudo pip install requests delegator.py && python /var/lib/waagent/custom-script/download/0/install.py ', ' --api-key ', parameters('apiKey'), ' --vault-url ', parameters('vaultUrl'), ' --provazio-dashboard-image ', parameters('provazioDashboardImage'), ' --system-id ', variables('systemId'), ' --system-description Azure', ' --system-version ', variables('systemVersion'), ' --system-domain ', parameters('systemDomain'), ' --system-region ', parameters('location'), ' --system-https-cert-kind ', parameters('httpsCertKind'), ' --system-resource-group-name ', resourceGroup().name, ' --system-vnet-name ', variables('vnetName'), ' --system-vnet-subnet-name ', variables('vnetSubnetName'), ' --system-vnet-resource-group-name ', variables('vnetResourceGroup'), ' --system-public-ip-address-kind ', variables('systemPublicIpAddressKind'), ' --data-cluster-num-instances ', parameters('numDataNodes'), ' --data-cluster-instance-size ', parameters('dataVmSize'), ' --app-cluster-num-instances ', parameters('numAppNodes'), ' --app-cluster-instance-size ', parameters('appVmSize'), ' --admin-username ', parameters('adminUsername'), ' --admin-password ', parameters('adminPassword'), ' --owner-full-name \"', parameters('ownerName'), '\" --owner-email azure@iguazio.com', ' --intercom-mode ', parameters('intercomMode'), variables('servicePrincipalArguments'), variables('whitelistIguazioNetworkArgument'), variables('whitelistCidrsArgument'))]",
           "fileUris": [
             "[variables('provisionScriptFileUri')]"
           ]
